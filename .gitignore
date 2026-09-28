@@ -1,0 +1,15 @@
+# Ejemplos y material del profesor
+Ejemplos_Practica_1A/
+Ejemplos_Practica_1A.zip
+Guion_Practica_1A.pdf
+
+# IDE files
+.theia/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
