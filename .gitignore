@@ -1,0 +1,10 @@
+# IDE files
+.theia/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
