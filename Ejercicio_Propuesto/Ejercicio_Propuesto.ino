@@ -118,6 +118,10 @@ void setup()
 
   // --- Escribir línea inicial en el fichero --------------------------------------
   writeToFlash("--- Inicio del registro de datos ---", false);
+  char dateTimeStr[64];
+  getDateTimeString(dateTimeStr, sizeof(dateTimeStr), "START");
+  writeToFlash(dateTimeStr, true);
+
 
   // --- Objetivo 4: Poner el micro en modo sleep indefinido -----------------------
   LowPower.sleep();
@@ -165,10 +169,34 @@ void loop()
     USBDevice.attach();
     delay(1000);
     while(!SerialUSB) {;}
-    SerialUSB.println("Fin del programa");
-    while(1){
-      digitalWrite(LED_BUILTIN, HIGH);
+
+    File file = filesystem.open(filename,  READ_ONLY);
+    if (!file) {
+      SerialUSB.print("Opening file ");
+      SerialUSB.print(filename);
+      SerialUSB.print(" failed for reading. Aborting ...");
+      on_exit_with_error_do();
+    }    
+    SerialUSB.print("Reading file contents:\n\t ");
+    
+    // Leemos el contenido del fichero hasta alcanzar la marca EOF
+    while(!file.eof()) {
+      char c;
+      int const bytes_read = file.read(&c, sizeof(c));
+      if (bytes_read) {
+        SerialUSB.print(c);
+        if (c == '\n') SerialUSB.print("\t ");
+      }
     }
+
+    // Cerramos el fichero
+    file.close();
+    SerialUSB.println("\nFile closed");
+
+    // Desmontamos el sistema de archivos
+    SerialUSB.println("Unmounting filesystem ... (program finished)");
+    filesystem.unmount();
+    exit(0);
   }
 
   // --- Volver a dormir al microcontrolador hasta la próxima interrupción ---------
@@ -285,6 +313,12 @@ void errorBlink()
     digitalWrite(LED_BUILTIN, LOW);
     delay(100);
   }
+}
+
+void on_exit_with_error_do()
+{
+  filesystem.unmount();
+  exit(EXIT_FAILURE);
 }
 
 // =================================================================================
