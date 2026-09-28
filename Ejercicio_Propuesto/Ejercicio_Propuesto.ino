@@ -48,12 +48,14 @@ RTCZero rtc;
 // Configuración de pines e interrupciones
 // ---------------------------------------------------------------------------------
 const int EXTERNAL_PIN = 5;              // Pin para interrupción externa
+const int FINISH_PIN = 4;
 
 // ---------------------------------------------------------------------------------
 // Variables volátiles (accedidas desde ISR)
 // ---------------------------------------------------------------------------------
 volatile uint16_t alarmFlag    = 0;      // Flag: alarma RTC activada
 volatile uint16_t externalFlag = 0;      // Flag: interrupción externa activada
+volatile uint16_t finishFlag = 0;
 volatile uint32_t _period_sec  = 0;      // Periodo de la alarma en segundos
 
 // ---------------------------------------------------------------------------------
@@ -76,6 +78,10 @@ void setup()
 
   // --- Configurar el pin de interrupción externa (pull-up + flanco de bajada) ----
   pinMode(EXTERNAL_PIN, INPUT_PULLUP);
+  pinMode(FINISH_PIN, INPUT_PULLUP);  
+
+  SerialUSB.begin(9600);
+  while(!SerialUSB) {;}
 
   // --- Inicializar memoria FLASH y montar SPIFFS ---------------------------------
   flash.begin();
@@ -103,6 +109,8 @@ void setup()
   // IMPORTANTE: Esta llamada debe hacerse ANTES de attachInterruptWakeup del RTC
   // porque LowPower.attachInterruptWakeup() reinicializa la configuración del RTC
   LowPower.attachInterruptWakeup(EXTERNAL_PIN, externalCallback, FALLING);
+
+  LowPower.attachInterruptWakeup(FINISH_PIN, finishCallback, FALLING);
 
   // --- Objetivo 2: Programar alarma periódica del RTC cada 10 segundos -----------
   LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, alarmCallback, CHANGE);
@@ -150,8 +158,22 @@ void loop()
     blinkLED(3, 300);
   }
 
+  if (finishFlag) {
+    finishFlag=0;
+    USBDevice.detach();
+    delay(100);
+    USBDevice.attach();
+    delay(1000);
+    while(!SerialUSB) {;}
+    SerialUSB.println("Fin del programa");
+    while(1){
+      digitalWrite(LED_BUILTIN, HIGH);
+    }
+  }
+
   // --- Volver a dormir al microcontrolador hasta la próxima interrupción ---------
   LowPower.sleep();
+
 }
 
 // =================================================================================
@@ -285,4 +307,9 @@ void alarmCallback()
 void externalCallback()
 {
   externalFlag++;
+}
+
+void finishCallback()
+{
+  finishFlag=1;
 }
