@@ -253,7 +253,7 @@ void getDateTimeString(char *buffer, size_t bufSize, const char *source)
 {
   const char *weekDay[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
 
-  // Lectura atómica del RTC mediante getEpoch()
+  // Lectura atómica del RTC mediante getEpoch() 
   time_t epoch = rtc.getEpoch();
   struct tm stm;
   gmtime_r(&epoch, &stm);
