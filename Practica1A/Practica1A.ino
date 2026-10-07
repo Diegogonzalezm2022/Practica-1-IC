@@ -60,7 +60,7 @@ volatile uint32_t _period_sec  = 0;      // Periodo de la alarma en segundos
 
 // ---------------------------------------------------------------------------------
 // Nombre del fichero en SPIFFS
-// ---------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------- 
 char filename[] = "sensor_log.txt";
 
 // =================================================================================
@@ -72,7 +72,7 @@ void setup()
   pinMode(LORA_RESET, OUTPUT);
   digitalWrite(LORA_RESET, LOW);
 
-  // --- Configurar el LED integrado -----------------------------------------------
+  // --- Configurar el LED integrado ----------------------------------------------- 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -124,7 +124,10 @@ void setup()
 
 
   // --- Objetivo 4: Poner el micro en modo sleep indefinido -----------------------
+  USBDevice.detach();
   LowPower.sleep();
+  USBDevice.attach();
+
 }
 
 // =================================================================================
@@ -164,10 +167,6 @@ void loop()
 
   if (finishFlag) {
     finishFlag=0;
-    USBDevice.detach();
-    delay(100);
-    USBDevice.attach();
-    delay(1000);
     while(!SerialUSB) {;}
 
     File file = filesystem.open(filename,  READ_ONLY);
@@ -200,7 +199,10 @@ void loop()
   }
 
   // --- Volver a dormir al microcontrolador hasta la próxima interrupción ---------
+  USBDevice.detach();
   LowPower.sleep();
+  USBDevice.attach();
+
 
 }
 
