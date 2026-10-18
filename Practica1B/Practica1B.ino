@@ -41,6 +41,8 @@ char thread_name[NUM_THREADS][15] = {  "top",
 
 volatile uint32_t threadPeriod_ms[NUM_THREADS] = { CYCLE_MS, 200, 100, 200, 0 };
 volatile int threadLoad[NUM_THREADS] = {0, 50, 50, 50, 0}; //AQUI
+volatile uint32_t targetLoad = 85;
+
 
 volatile uint32_t threadEffectivePeriod_ms[NUM_THREADS] = { 0, 0, 0, 0, 0 };
 volatile uint32_t threadCycle_ms[NUM_THREADS] = { 0, 0, 0, 0, 0 };
@@ -133,6 +135,20 @@ static THD_FUNCTION(top, arg)
       SerialUSB.println(threadEffectivePeriod_ms[tid]);
     }
     SerialUSB.println();
+
+    threadLoad_t * idleLoad = &sysLoad.threadLoad[4];
+    idleLoad->loadPerCycle_per = (100 * (float)idleLoad->ticksPerCycle) / accumTicks;
+
+    float error = (100 - targetLoad) - idleLoad->loadPerCycle_per;
+
+    float Kp = 0.25;
+
+    threadLoad[1] -= Kp*error;
+
+    threadLoad[2] -= Kp*error;
+
+    threadLoad[3] -= Kp*error;
+
     
     // Switch off the LED
     digitalWrite(LED_BUILTIN, LOW);
