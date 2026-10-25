@@ -44,7 +44,9 @@ static void fmt1(float v, char *out, size_t n)
 #define UTIL_BAJAR_TH      (UTIL_MAX_PCT - UTIL_RESERVE_PCT)   // 78,0 %
 #define UTIL_HYST_PCT      2.0f
 #define UTIL_TARGET_PCT    (UTIL_BAJAR_TH - UTIL_HYST_PCT)          // 76,0 %
-#define CTRL_KP             1.5f
+#define CTRL_KP             0.88f
+#define CTRL_KI             0.5f
+#define CTRL_KD             0.39f
 #define LOAD_UP_MAX_FACTOR  1.15f   // máx. 15 % de subida por ciclo
 #define LOAD_DOWN_GLOBAL    0.92f   // cota inferior del factor proporcional (máx. 8 % bajada/ciclo)
 #define LOAD_DOWN_THREAD    0.85f   // máx. 15 % bajada en la hebra incumplidora de periodo
@@ -79,6 +81,12 @@ volatile uint32_t threadPeriodMisses[NUM_THREADS]       = { 0, 0, 0, 0, 0 };
 
 // Evita que el compilador elimine el bucle de carga computacional.
 volatile float workloadSink = 0;
+
+// Valores de control PID
+
+volatile double previousTime = 0.0f;
+volatile double lastError = 0.0f;
+volatile double cumError = 0.0f;
 
 //------------------------------------------------------------------------------
 // Estructuras de medida y de informe
@@ -286,6 +294,8 @@ static THD_FUNCTION(top, arg)
     //------------------------------------------------------------------
     const char *action = "MANTENER (banda de histeresis)";
     bool changed = false;
+    unsigned long currentTime = millis();
+    double elapsedTime = (double)(currentTime - previousTime);
 
     // Un miss sólo se atribuye a la carga si C supera la mitad del periodo.
     bool periodMissCausedByLoad = false;
@@ -300,7 +310,9 @@ static THD_FUNCTION(top, arg)
     // Las reducciones de seguridad también actúan en warm-up; solo se evita subir.
     if (overloadCount >= OVERLOAD_CYCLES) {
       float errDown = utilPct - UTIL_TARGET_PCT;    // positivo cuando util > target
-      float factorDown = 1.0f - (CTRL_KP * errDown) / 100.0f;
+      cumError += errDown * elapsedTime;
+      float rateError = (errDown - lastError) / elapsedTime;
+      float factorDown = 1.0f - (CTRL_KP * errDown + CTRL_KI * cumError + CTRL_KD * rateError) / 100.0f;
       if (factorDown < LOAD_DOWN_GLOBAL) factorDown = LOAD_DOWN_GLOBAL;  // cota mínima
       if (factorDown > 1.0f) factorDown = 1.0f;
       changed = scaleAllWorkers(factorDown);
@@ -321,7 +333,10 @@ static THD_FUNCTION(top, arg)
     } else if (utilPct < UTIL_TARGET_PCT) {
       // Ley proporcional acotada (factor sobre la carga actual).
       float error = UTIL_TARGET_PCT - utilPct;
-      float factor = 1.0f + (CTRL_KP * error) / 100.0f;
+      cumError += error * elapsedTime;
+      float rateError = (error - lastError) / elapsedTime;
+            
+      float factor = 1.0f + (CTRL_KP * error + CTRL_KI * cumError + CTRL_KD * rateError) / 100.0f;
 
       if (factor > LOAD_UP_MAX_FACTOR) factor = LOAD_UP_MAX_FACTOR;
       if (factor < 1.0f) factor = 1.0f;
