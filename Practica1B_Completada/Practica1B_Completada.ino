@@ -56,7 +56,7 @@ static void fmt1(float v, char *out, size_t n)
 #define MISS_CYCLES         2
 
 // Extra: variación aleatoria de la intensidad por activación (0 = desactivada).
-#define RANDOM_LOAD_PCT     15
+#define RANDOM_LOAD_PCT     0
 
 #define DETAIL_EVERY        5
 
@@ -296,6 +296,7 @@ static THD_FUNCTION(top, arg)
     bool changed = false;
     unsigned long currentTime = millis();
     double elapsedTime = (double)(currentTime - previousTime);
+    previousTime = currentTime;
 
     // Un miss sólo se atribuye a la carga si C supera la mitad del periodo.
     bool periodMissCausedByLoad = false;
@@ -312,7 +313,11 @@ static THD_FUNCTION(top, arg)
       float errDown = utilPct - UTIL_TARGET_PCT;    // positivo cuando util > target
       cumError += errDown * elapsedTime;
       float rateError = (errDown - lastError) / elapsedTime;
-      float factorDown = 1.0f - (CTRL_KP * errDown + CTRL_KI * cumError + CTRL_KD * rateError) / 100.0f;
+      float totalError = CTRL_KP * errDown + CTRL_KI * cumError + CTRL_KD * rateError;
+
+      lastError = totalError;
+
+      float factorDown = 1.0f - (totalError) / 100.0f;
       if (factorDown < LOAD_DOWN_GLOBAL) factorDown = LOAD_DOWN_GLOBAL;  // cota mínima
       if (factorDown > 1.0f) factorDown = 1.0f;
       changed = scaleAllWorkers(factorDown);
@@ -335,8 +340,12 @@ static THD_FUNCTION(top, arg)
       float error = UTIL_TARGET_PCT - utilPct;
       cumError += error * elapsedTime;
       float rateError = (error - lastError) / elapsedTime;
+
+      float totalError = CTRL_KP * error + CTRL_KI * cumError + CTRL_KD * rateError;
+
+      lastError = totalError;
             
-      float factor = 1.0f + (CTRL_KP * error + CTRL_KI * cumError + CTRL_KD * rateError) / 100.0f;
+      float factor = 1.0f + (totalError) / 100.0f;
 
       if (factor > LOAD_UP_MAX_FACTOR) factor = LOAD_UP_MAX_FACTOR;
       if (factor < 1.0f) factor = 1.0f;
