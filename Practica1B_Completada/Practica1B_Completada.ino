@@ -4,7 +4,7 @@
 // Punto de partida: Ejemplo 3 del guion, "Estimación de la carga computacional".
 // Se conservan su estructura (top + 3 workers + loop() como hebra idle), sus
 // vectores de medida y chBSemWaitTimeout(); se añade el control de carga del
-// enunciado y el extra de carga aleatoria con histéresis.  Requiere ChRt.
+// enunciado y el extra de carga aleatoria periódica con histéresis.  Requiere ChRt.
 //------------------------------------------------------------------------------
 #include <ChRt.h>
 #include <math.h>
@@ -56,7 +56,10 @@ static void fmt1(float v, char *out, size_t n)
 #define MISS_CYCLES         2
 
 // Extra: variación aleatoria de la intensidad por activación (0 = desactivada).
-#define RANDOM_LOAD_PCT     0
+// Con RANDOM_LOAD_PCT > 0, la carga aleatoria se activa y desactiva cada
+// RANDOM_LOAD_INTERVAL_MS milisegundos (alterna entre activa e inactiva).
+#define RANDOM_LOAD_PCT          10   // ±10 % de variación aleatoria
+#define RANDOM_LOAD_INTERVAL_MS  30000  // alterna cada 30 s
 
 #define DETAIL_EVERY        5
 
@@ -87,6 +90,25 @@ volatile float workloadSink = 0;
 volatile double previousTime = 0.0f;
 volatile double lastError = 0.0f;
 volatile double cumError = 0.0f;
+
+//------------------------------------------------------------------------------
+// Carga aleatoria periódica (extra)
+// randomLoadActive se alterna cada RANDOM_LOAD_INTERVAL_MS ms mediante un
+// virtual timer de ChibiOS disparado desde la ISR del sistema.
+//------------------------------------------------------------------------------
+#if RANDOM_LOAD_PCT > 0
+static virtual_timer_t randomLoadTimer;
+volatile bool randomLoadActive = false;   // accedida desde worker (normal) y timer (ISR)
+
+static void randomLoadTimerCb(void *p)
+{
+  (void)p;
+  // Alterna el estado de la carga aleatoria
+  randomLoadActive = !randomLoadActive;
+  // Re-arma el timer para el siguiente intervalo
+  chVTSetI(&randomLoadTimer, TIME_MS2I(RANDOM_LOAD_INTERVAL_MS), randomLoadTimerCb, NULL);
+}
+#endif
 
 //------------------------------------------------------------------------------
 // Estructuras de medida y de informe
@@ -125,6 +147,7 @@ typedef struct {
   const char *action;
   bool changed;
   bool detail;
+  bool randomActive;  // true cuando la carga aleatoria está activa
 } report_t;
 
 report_t reportData;
@@ -193,7 +216,7 @@ static THD_FUNCTION(top, arg)
   uint32_t lastMisses[NUM_THREADS];
   memset(lastMisses, 0, sizeof(lastMisses));
 
-  // Incumplimientos consecutivos por hebra (para el extra de histéresis)
+  // Incumplimientos consecutivos por hebra: si alcanza MISS_CYCLES activa reducción de carga.
   uint32_t missStreak[NUM_THREADS];
   memset(missStreak, 0, sizeof(missStreak));
 
@@ -290,7 +313,7 @@ static THD_FUNCTION(top, arg)
     }
 
     //------------------------------------------------------------------
-    // Control de carga (warm-up, histéresis y ajuste proporcional)
+    // Control de carga (warm-up, histéresis y ajuste PID)
     //------------------------------------------------------------------
     const char *action = "MANTENER (banda de histeresis)";
     bool changed = false;
@@ -336,7 +359,7 @@ static THD_FUNCTION(top, arg)
       action = "WARM-UP (carga minima)";
 
     } else if (utilPct < UTIL_TARGET_PCT) {
-      // Ley proporcional acotada (factor sobre la carga actual).
+      // Control PID acotado: sube la carga cuando hay margen disponible.
       float error = UTIL_TARGET_PCT - utilPct;
       cumError += error * elapsedTime;
       float rateError = (error - lastError) / elapsedTime;
@@ -375,6 +398,11 @@ static THD_FUNCTION(top, arg)
     reportData.action = action;
     reportData.changed = changed;
     reportData.detail = ((cycle % DETAIL_EVERY) == 0);
+#if RANDOM_LOAD_PCT > 0
+    reportData.randomActive = randomLoadActive;
+#else
+    reportData.randomActive = false;
+#endif
 
     chBSemSignal(&print_sem);
 
@@ -426,11 +454,14 @@ static THD_FUNCTION(worker, arg)
     int niter = threadLoad[worker_ID];
 
 #if RANDOM_LOAD_PCT > 0
-    // Variación aleatoria de la intensidad (extra)
-    rndState = rndState * 1664525u + 1013904223u;
-    int spread = (niter * RANDOM_LOAD_PCT) / 100;
-    if (spread > 0) {
-      niter += (int)(rndState % (uint32_t)(2 * spread + 1)) - spread;
+    // Variación aleatoria de la intensidad (extra):
+    // solo se aplica cuando randomLoadActive == true (alternado cada RANDOM_LOAD_INTERVAL_MS).
+    if (randomLoadActive) {
+      rndState = rndState * 1664525u + 1013904223u;
+      int spread = (niter * RANDOM_LOAD_PCT) / 100;
+      if (spread > 0) {
+        niter += (int)(rndState % (uint32_t)(2 * spread + 1)) - spread;
+      }
     }
 #endif
 
@@ -506,9 +537,17 @@ static THD_FUNCTION(printer, arg)
     size_t len = 0;
     int n = snprintf(buf, sizeof(buf),
                      "#%lu  idle=%s%%  util=%s%%  workers=%s%%"
-                     "  top/ISR/print=%s%%  target=%s%%\r\n",
+                     "  top/ISR/print=%s%%  target=%s%%"
+#if RANDOM_LOAD_PCT > 0
+                     "  rand=%s"
+#endif
+                     "\r\n",
                      (unsigned long)r.cycle,
-                     fs[0], fs[1], fs[2], fs[3], fs[4]);
+                     fs[0], fs[1], fs[2], fs[3], fs[4]
+#if RANDOM_LOAD_PCT > 0
+                     , r.randomActive ? "ON" : "off"
+#endif
+                     );
     if (n > 0) len = (n < (int)sizeof(buf)) ? (size_t)n : sizeof(buf) - 1;
 
     if (r.detail) {
@@ -609,7 +648,13 @@ void chSetup()
   SerialUSB.println("%");
   SerialUSB.print("RANDOM_LOAD=");
   SerialUSB.print(RANDOM_LOAD_PCT);
+#if RANDOM_LOAD_PCT > 0
+  SerialUSB.print("%  RANDOM_INTERVAL=");
+  SerialUSB.print(RANDOM_LOAD_INTERVAL_MS / 1000);
+  SerialUSB.print("s  OVERLOAD_CYCLES=");
+#else
   SerialUSB.print("%  OVERLOAD_CYCLES=");
+#endif
   SerialUSB.print(OVERLOAD_CYCLES);
   SerialUSB.print("  MISS_CYCLES=");
   SerialUSB.println(MISS_CYCLES);
@@ -625,6 +670,14 @@ void chSetup()
   }
   SerialUSB.println("Empezando a carga minima (warm-up)...");
   SerialUSB.println();
+
+#if RANDOM_LOAD_PCT > 0
+  // Arranca el virtual timer que alterna la carga aleatoria cada RANDOM_LOAD_INTERVAL_MS.
+  // La primera activación ocurrirá al cabo de ese intervalo; empieza inactiva.
+  chSysLock();
+  chVTSetI(&randomLoadTimer, TIME_MS2I(RANDOM_LOAD_INTERVAL_MS), randomLoadTimerCb, NULL);
+  chSysUnlock();
+#endif
 
   // Creación de las hebras (workers y printer antes que top), prioridades según Rate Monotonic.
   sysLoad.threadLoad[1].thd = chThdCreateStatic(waWorker1, sizeof(waWorker1),
