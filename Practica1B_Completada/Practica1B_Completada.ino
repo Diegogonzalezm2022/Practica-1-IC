@@ -44,8 +44,8 @@ static void fmt1(float v, char *out, size_t n)
 #define UTIL_BAJAR_TH      (UTIL_MAX_PCT - UTIL_RESERVE_PCT)   // 78,0 %
 #define UTIL_HYST_PCT      2.0f
 #define UTIL_TARGET_PCT    (UTIL_BAJAR_TH - UTIL_HYST_PCT)          // 76,0 %
-#define CTRL_KP             0.88f
-#define CTRL_KI             0.5f
+#define CTRL_KP             0.4f
+#define CTRL_KI             0.9f
 #define CTRL_KD             0.39f
 #define LOAD_UP_MAX_FACTOR  1.15f   // máx. 15 % de subida por ciclo
 #define LOAD_DOWN_GLOBAL    0.92f   // cota inferior del factor proporcional (máx. 8 % bajada/ciclo)
